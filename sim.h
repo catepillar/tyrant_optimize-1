@@ -172,6 +172,8 @@ public:
     // Meaningless in playcard_phase,
     // otherwise is the index of the current card in players->structures or players->assaults
     unsigned current_ci;
+    unsigned last_decision_turn;
+    unsigned points_since_last_decision;
 
     unsigned fusion_count;
 
