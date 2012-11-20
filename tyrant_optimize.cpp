@@ -959,7 +959,11 @@ int main(int argc, char** argv)
     std::vector<std::tuple<unsigned, unsigned, Operation> > todo;
     for(unsigned argIndex(3); argIndex < argc; ++argIndex)
     {
-        if(strcmp(argv[argIndex], "-c") == 0)
+        if(strcmp(argv[argIndex], "-a") == 0)
+        {
+            use_anp = true;
+        }
+        else if(strcmp(argv[argIndex], "-c") == 0)
         {
             keep_commander = true;
         }
