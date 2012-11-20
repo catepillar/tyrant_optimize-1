@@ -415,7 +415,7 @@ void thread_evaluate(boost::barrier& main_barrier,
                 std::vector<unsigned> thread_score_local(thread_score.size(), 0); //!
                 for(unsigned index(0); index < result.size(); ++index)
                 {
-                    thread_score[index] += result[index] == 0 ? 1 : 0; //!
+                    thread_score[index] += result[index]; //!
                     thread_score_local[index] = thread_score[index]; // !
                 }
                 ++thread_total; //!

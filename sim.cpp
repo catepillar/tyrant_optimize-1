@@ -309,7 +309,7 @@ void PlayCard::onPlaySkills<CardType::action>()
 //------------------------------------------------------------------------------
 void turn_start_phase(Field* fd);
 void prepend_on_death(Field* fd);
-// return value : 0 -> attacker wins, 1 -> defender wins
+// return value : 1 -> attacker wins, 0 -> defender wins
 unsigned play(Field* fd)
 {
     fd->players[0]->commander.m_player = 0;
@@ -404,10 +404,21 @@ unsigned play(Field* fd)
         ++fd->turn;
     }
     // defender wins
-    if(fd->players[0]->commander.m_hp == 0) { _DEBUG_MSG("Defender wins.\n"); return(1); }
+    if(fd->players[0]->commander.m_hp == 0)
+    {
+        _DEBUG_MSG("Defender wins.\n");
+        return(0);
+    }
     // attacker wins
-    if(fd->players[1]->commander.m_hp == 0) { _DEBUG_MSG("Attacker wins.\n"); return(0); }
-    if(fd->turn >= turn_limit) { return(1); }
+    if(fd->players[1]->commander.m_hp == 0)
+    {
+        _DEBUG_MSG("Attacker wins.\n");
+        return(1);
+    }
+    if(fd->turn >= turn_limit)
+    {
+        return(0);
+    }
 }
 //------------------------------------------------------------------------------
 // All the stuff that happens at the beginning of a turn, before a card is played
