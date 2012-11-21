@@ -16,6 +16,7 @@
 #include <cassert>
 #include <cstring>
 #include <ctime>
+#include <csignal>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -36,6 +37,15 @@
 #include "tyrant.h"
 #include "xml.h"
 //#include "timer.hpp"
+
+namespace
+{
+bool print_deck_now{false};
+void sigusr1_handler(int sig)
+{
+    print_deck_now = true;
+}
+}
 
 using namespace std::placeholders;
 //------------------------------------------------------------------------------
@@ -542,6 +552,11 @@ void hill_climbing(unsigned num_iterations, DeckIface* d1, Process& proc)
             }
             // Now that all cards are evaluated, take the best one
             d1->cards[slot_i] = best_cards[slot_i];
+            if (print_deck_now)
+            {
+                print_deck_now = false;
+                print_deck(best_commander, best_cards);
+            }
         }
     }
     std::cout << "Best deck: " << best_score * 100.0 << "%\n";
@@ -634,6 +649,11 @@ void hill_climbing_ordered(unsigned num_iterations, DeckOrdered* d1, Process& pr
             }
             // Now that all cards are evaluated, take the best one
             // d1->cards[slot_i] = best_cards[slot_i];
+            if (print_deck_now)
+            {
+                print_deck_now = false;
+                print_deck(best_commander, best_cards);
+            }
         }
     }
     std::cout << "Best deck: " << best_score * 100.0 << "%\n";
@@ -914,6 +934,8 @@ int main(int argc, char** argv)
     load_decks_xml(decks, cards);
     load_decks(decks, cards);
     fill_skill_table();
+
+    signal(SIGUSR1, sigusr1_handler);
 
     if(argc <= 2)
     {
