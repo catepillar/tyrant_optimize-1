@@ -462,6 +462,16 @@ void print_score_info(const std::pair<std::vector<unsigned> , unsigned>& results
     std::cout << "out of " << results.second << ")\n" << std::flush;
 }
 //------------------------------------------------------------------------------
+void print_deck(const Card* best_commander, const std::vector<const Card*>& best_cards)
+{
+    std::cout << best_commander->m_name;
+    for(const Card* card: best_cards)
+    {
+        std::cout << ", " << card->m_name;
+    }
+    std::cout << "\n";
+}
+//------------------------------------------------------------------------------
 void hill_climbing(unsigned num_iterations, DeckIface* d1, Process& proc)
 {
     auto results = proc.evaluate(num_iterations);
@@ -535,12 +545,7 @@ void hill_climbing(unsigned num_iterations, DeckIface* d1, Process& proc)
         }
     }
     std::cout << "Best deck: " << best_score * 100.0 << "%\n";
-    std::cout << best_commander->m_name;
-    for(const Card* card: best_cards)
-    {
-        std::cout << ", " << card->m_name;
-    }
-    std::cout << "\n";
+    print_deck(best_commander, best_cards);
 }
 //------------------------------------------------------------------------------
 void hill_climbing_ordered(unsigned num_iterations, DeckOrdered* d1, Process& proc)
@@ -632,12 +637,7 @@ void hill_climbing_ordered(unsigned num_iterations, DeckOrdered* d1, Process& pr
         }
     }
     std::cout << "Best deck: " << best_score * 100.0 << "%\n";
-    std::cout << best_commander->m_name;
-    for(const Card* card: best_cards)
-    {
-        std::cout << ", " << card->m_name;
-    }
-    std::cout << "\n";
+    print_deck(best_commander, best_cards);
 }
 //------------------------------------------------------------------------------
 // Implements iteration over all combination of k elements from n elements.
