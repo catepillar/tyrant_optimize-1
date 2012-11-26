@@ -211,6 +211,7 @@ struct PlayCard
         placeCard<type>();
         onPlaySkills<type>();
         blitz<type>();
+        fieldEffects<type>();
     }
 
     // action
@@ -244,6 +245,12 @@ struct PlayCard
     // all except assault: noop
     template <enum CardType::CardType>
     void blitz()
+    {
+    }
+
+    // all except assault: noop
+    template <enum CardType::CardType>
+    void fieldEffects()
     {
     }
 
@@ -282,6 +289,15 @@ void PlayCard::blitz<CardType::assault>()
     if(card->m_blitz && fd->tip->assaults.size() > status->m_index && fd->tip->assaults[status->m_index].m_hp > 0 && fd->tip->assaults[status->m_index].m_delay == 0)
     {
         status->blitz = true;
+    }
+}
+// assault
+template <>
+void PlayCard::fieldEffects<CardType::assault>()
+{
+    if(fd->effect == Effect::toxic)
+    {
+        status->m_poisoned = 1;
     }
 }
 // action
@@ -1577,6 +1593,11 @@ void summon_card(Field* fd, unsigned player, const Card* summoned)
         {
             card_status.blitz = true;
         }
+
+        if(fd->effect == Effect::toxic)
+        {
+            card_status.m_poisoned = 1;
+        }
     }
 }
 void perform_summon(Field* fd, CardStatus* src_status, const SkillSpec& s)
@@ -1738,6 +1759,10 @@ void modify_cards(Cards& cards, enum Effect effect)
             break;
         case Effect::chilling_touch:
             add_to_commanders(cards, freeze, 0);
+            break;
+        case Effect::toxic:
+            // Do nothing; this is implemented in PlayCard::fieldEffects
+            // and summon_card
             break;
         default:
             // TODO: throw something more useful
