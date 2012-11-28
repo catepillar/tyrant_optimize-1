@@ -907,6 +907,7 @@ void usage(int argc, char** argv)
     std::cout << "  example: \'fear:0.2;slowroll:0.8\' means fear is the defense deck 20% of the time, while slowroll is the defense deck 80% of the time.\n";
     std::cout << "\n";
     std::cout << "Flags:\n";
+    std::cout << "  -a: optimize for ANP instead of win rate.\n";
     std::cout << "  -c: don't try to optimize the commander.\n";
     std::cout << "  -o: restrict hill climbing to the owned cards listed in \"ownedcards.txt\".\n";
     std::cout << "  -r: the attack deck is played in order instead of randomly (respects the 3 cards drawn limit).\n";
