@@ -945,17 +945,12 @@ int main(int argc, char** argv)
     for(auto deck_parsed: deck_list_parsed)
     {
         DeckIface* def_deck = find_deck(decks, deck_parsed.first);
-        if(def_deck != nullptr)
+        if(def_deck == nullptr)
         {
-            def_decks.push_back(def_deck);
-            def_decks_factors.push_back(deck_parsed.second);
+            def_deck = hash_to_deck(deck_parsed.first.c_str(), cards);
         }
-        else
-        {
-            std::cout << "The deck " << deck_parsed.first << " was not found. Available decks:\n";
-            print_available_decks(decks);
-            return(5);
-        }
+        def_decks.push_back(def_deck);
+        def_decks_factors.push_back(deck_parsed.second);
     }
     std::vector<std::tuple<unsigned, unsigned, Operation> > todo;
     for(unsigned argIndex(3); argIndex < argc; ++argIndex)
@@ -1020,13 +1015,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        std::cout << "The deck " << att_deck_name << " was not found. Available decks:\n";
-        std::cout << "Custom decks:\n";
-        for(auto it: decks.custom_decks)
-        {
-            std::cout << "  " << it.first << "\n";
-        }
-        return(5);
+        att_deck = hash_to_deck(att_deck_name.c_str(), cards);
     }
     print_deck(*att_deck);
 
