@@ -20,6 +20,7 @@ extern unsigned turn_limit;
 
 void fill_skill_table();
 unsigned play(Field* fd);
+void modify_cards(Cards& cards, enum Effect effect);
 // Pool-based indexed storage.
 //---------------------- Pool-based indexed storage ----------------------------
 template<typename T>
@@ -108,6 +109,7 @@ struct CardStatus
     unsigned m_protected;
     unsigned m_rallied;
     unsigned m_weakened;
+    bool m_temporary_split;
 
     CardStatus() {}
     CardStatus(const Card* card);
@@ -154,6 +156,7 @@ public:
     std::array<CardStatus*, 256> selection_array;
     unsigned turn;
     gamemode_t gamemode;
+    const enum Effect effect;
     // With the introduction of on death skills, a single skill can trigger arbitrary many skills.
     // They are stored in this, and cleared after all have been performed.
     std::deque<std::tuple<CardStatus*, SkillSpec> > skill_queue;
@@ -177,13 +180,14 @@ public:
 
     unsigned fusion_count;
 
-    Field(std::mt19937& re_, const Cards& cards_, Hand& hand1, Hand& hand2, gamemode_t _gamemode) :
+    Field(std::mt19937& re_, const Cards& cards_, Hand& hand1, Hand& hand2, gamemode_t _gamemode, enum Effect _effect) :
         end{false},
         re(re_),
         cards(cards_),
         players{{&hand1, &hand2}},
         turn(1),
-        gamemode(_gamemode)
+        gamemode(_gamemode),
+        effect(_effect)
     {
     }
 

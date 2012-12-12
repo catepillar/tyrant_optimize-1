@@ -70,6 +70,11 @@ DeckIface* find_deck(const Decks& decks, std::string name)
     {
         return(it2->second);
     }
+    auto it4 = decks.quest_decks_by_name.find(name);
+    if(it4 != decks.quest_decks_by_name.end())
+    {
+        return(it4->second);
+    }
     auto it3 = decks.custom_decks.find(name);
     if(it3 != decks.custom_decks.end())
     {
@@ -264,8 +269,9 @@ struct SimulationData
     std::vector<Hand*> def_hands;
     std::vector<double> factors;
     gamemode_t gamemode;
+    enum Effect effect;
 
-    SimulationData(unsigned seed, const Cards& cards_, const Decks& decks_, unsigned num_def_decks_, std::vector<double> factors_, gamemode_t gamemode_) :
+    SimulationData(unsigned seed, const Cards& cards_, const Decks& decks_, unsigned num_def_decks_, std::vector<double> factors_, gamemode_t gamemode_, enum Effect effect_) :
         re(seed),
         cards(cards_),
         decks(decks_),
@@ -273,7 +279,8 @@ struct SimulationData
         att_hand(nullptr),
         def_decks(num_def_decks_),
         factors(factors_),
-        gamemode(gamemode_)
+        gamemode(gamemode_),
+        effect(effect_)
     {
         for(auto def_deck: def_decks)
         {
@@ -304,7 +311,7 @@ struct SimulationData
         {
             att_hand.reset(re);
             def_hand->reset(re);
-            Field fd(re, cards, att_hand, *def_hand, gamemode);
+            Field fd(re, cards, att_hand, *def_hand, gamemode, effect);
             unsigned result(play(&fd));
             res.emplace_back(result);
         }
@@ -332,8 +339,9 @@ public:
     const std::vector<DeckIface*> def_decks;
     std::vector<double> factors;
     gamemode_t gamemode;
+    enum Effect effect;
 
-    Process(unsigned _num_threads, const Cards& cards_, const Decks& decks_, DeckIface* att_deck_, std::vector<DeckIface*> _def_decks, std::vector<double> _factors, gamemode_t _gamemode) :
+    Process(unsigned _num_threads, const Cards& cards_, const Decks& decks_, DeckIface* att_deck_, std::vector<DeckIface*> _def_decks, std::vector<double> _factors, gamemode_t _gamemode, enum Effect _effect) :
         num_threads(_num_threads),
         cards(cards_),
         decks(decks_),
@@ -341,13 +349,14 @@ public:
         def_decks(_def_decks),
         factors(_factors),
         main_barrier(num_threads+1),
-        gamemode(_gamemode)
+        gamemode(_gamemode),
+        effect(_effect)
     {
         destroy_threads = false;
         unsigned seed(time(0));
         for(unsigned i(0); i < num_threads; ++i)
         {
-            threads_data.push_back(new SimulationData(seed + i, cards, decks, def_decks.size(), factors, gamemode));
+            threads_data.push_back(new SimulationData(seed + i, cards, decks, def_decks.size(), factors, gamemode, effect));
             threads.push_back(new boost::thread(thread_evaluate, std::ref(main_barrier), std::ref(shared_mutex), std::ref(*threads_data.back()), std::ref(*this)));
         }
     }
@@ -909,7 +918,9 @@ void usage(int argc, char** argv)
     std::cout << "Flags:\n";
     std::cout << "  -a: optimize for ANP instead of win rate.\n";
     std::cout << "  -c: don't try to optimize the commander.\n";
+    std::cout << "  -e <effect>: set the battleground effect.\n";
     std::cout << "  -o: restrict hill climbing to the owned cards listed in \"ownedcards.txt\".\n";
+    std::cout << "  -q: quest mode. Removes faction restrictions from defending commanders and automatically sets quest effect.\n";
     std::cout << "  -r: the attack deck is played in order instead of randomly (respects the 3 cards drawn limit).\n";
     std::cout << "  -s: use surge (default is fight).\n";
     std::cout << "  -t <num>: set the number of threads, default is 4.\n";
@@ -952,6 +963,14 @@ int main(int argc, char** argv)
         def_decks.push_back(def_deck);
         def_decks_factors.push_back(deck_parsed.second);
     }
+
+    enum Effect effect = Effect::none;
+    std::map<std::string, int> effect_map;
+    for(unsigned i(0); i < Effect::num_effects; ++i)
+    {
+        effect_map[effect_names[i]] = i;
+    }
+
     std::vector<std::tuple<unsigned, unsigned, Operation> > todo;
     for(unsigned argIndex(3); argIndex < argc; ++argIndex)
     {
@@ -963,10 +982,54 @@ int main(int argc, char** argv)
         {
             keep_commander = true;
         }
+        else if(strcmp(argv[argIndex], "-e") == 0)
+        {
+            std::string arg_effect(argv[argIndex + 1]);
+            auto x = effect_map.find(arg_effect);
+            if(x == effect_map.end())
+            {
+                std::cout << "The effect '" << arg_effect << "' was not found.\n";
+                return(6);
+            }
+            effect = static_cast<enum Effect>(x->second);
+            argIndex += 1;
+        }
         else if(strcmp(argv[argIndex], "-o") == 0)
         {
             read_owned_cards(cards, owned_cards);
             use_owned_cards = true;
+        }
+        else if(strcmp(argv[argIndex], "-q") == 0)
+        {
+            // Strip faction restrictions from commanders of all defending decks
+            // The assumption is that the attacking deck won't use these commanders.
+            // If the attacking deck does, its commander will receive this modification as well.
+            for(auto def_deck: def_decks)
+            {
+                // Can't directly use def_deck->commander, as it is const.
+                unsigned commander_id(def_deck->commander->m_id);
+                for(auto& skill: cards.cards_by_id[commander_id]->m_skills)
+                {
+                    skill = std::make_tuple(std::get<0>(skill), std::get<1>(skill), allfactions);
+                }
+            }
+            // Set quest effect:
+            for(auto deck_parsed: deck_list_parsed)
+            {
+                auto effect_id = decks.quest_effects_by_name.find(deck_parsed.first);
+                if(effect_id == decks.quest_effects_by_name.end())
+                {
+                    std::cout << "WARNING: The deck '" << deck_parsed.first << "' has no battleground effect! Are you sure it's a quest deck?\n";
+                    continue;
+                }
+                enum Effect this_effect = static_cast<enum Effect>(effect_id->second);
+                if(effect != Effect::none && this_effect != effect)
+                {
+                    std::cout << "ERROR: Inconsistent effects! Had " << effect << ", now have " << this_effect << "\n";
+                    return(7);
+                }
+                effect = this_effect;
+            }
         }
         else if(strcmp(argv[argIndex], "-r") == 0)
         {
@@ -1025,7 +1088,9 @@ int main(int argc, char** argv)
         att_deck_ordered = std::make_shared<DeckOrdered>(*att_deck);
     }
 
-    Process p(num_threads, cards, decks, ordered ? att_deck_ordered.get() : att_deck, def_decks, def_decks_factors, gamemode);
+    modify_cards(cards, effect);
+
+    Process p(num_threads, cards, decks, ordered ? att_deck_ordered.get() : att_deck, def_decks, def_decks_factors, gamemode, effect);
     {
         //ScopeClock timer;
         for(auto op: todo)

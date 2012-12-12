@@ -60,7 +60,8 @@ CardStatus::CardStatus(const Card* card) :
     m_poisoned(0),
     m_protected(0),
     m_rallied(0),
-    m_weakened(0)
+    m_weakened(0),
+    m_temporary_split(false)
 {
 }
 //------------------------------------------------------------------------------
@@ -211,6 +212,7 @@ struct PlayCard
         placeCard<type>();
         onPlaySkills<type>();
         blitz<type>();
+        fieldEffects<type>();
     }
 
     // action
@@ -244,6 +246,12 @@ struct PlayCard
     // all except assault: noop
     template <enum CardType::CardType>
     void blitz()
+    {
+    }
+
+    // all except assault: noop
+    template <enum CardType::CardType>
+    void fieldEffects()
     {
     }
 
@@ -282,6 +290,20 @@ void PlayCard::blitz<CardType::assault>()
     if(card->m_blitz && fd->tip->assaults.size() > status->m_index && fd->tip->assaults[status->m_index].m_hp > 0 && fd->tip->assaults[status->m_index].m_delay == 0)
     {
         status->blitz = true;
+    }
+}
+// assault
+template <>
+void PlayCard::fieldEffects<CardType::assault>()
+{
+    if(fd->effect == Effect::toxic)
+    {
+        status->m_poisoned = 1;
+    }
+    else if(fd->effect == Effect::decay)
+    {
+        status->m_poisoned = 1;
+        status->m_diseased = true;
     }
 }
 // action
@@ -344,6 +366,17 @@ unsigned play(Field* fd)
         {
             fd->tip->commander.m_hp = fd->tip->commander.m_card->m_health;
         }
+
+        if(fd->effect == Effect::clone_project ||
+           (fd->effect == Effect::clone_experiment && (fd->turn == 9 || fd->turn == 10)))
+        {
+            std::vector<SkillSpec> skills;
+            skills.emplace_back(temporary_split, 0, allfactions);
+            // The skill doesn't actually come from the commander,
+            // but we need to provide some source and it seemed most reasonable.
+            evaluate_skills(fd, &fd->tap->commander, skills);
+        }
+
         // Play a card
         const Card* played_card(fd->tap->deck->next());
         if(played_card)
@@ -365,6 +398,15 @@ unsigned play(Field* fd)
         // Evaluate commander
         fd->current_phase = Field::commander_phase;
         evaluate_skills(fd, &fd->tap->commander, fd->tap->commander.m_card->m_skills);
+
+        if (fd->effect == Effect::genesis)
+        {
+            unsigned index(fd->rand(0, fd->cards.player_assaults.size() - 1));
+            std::vector<SkillSpec> skills;
+            skills.emplace_back(summon, fd->cards.player_assaults[index]->m_id, allfactions);
+            evaluate_skills(fd, &fd->tap->commander, skills);
+        }
+
         // Evaluate structures
         fd->current_phase = Field::structures_phase;
         for(fd->current_ci = 0; !fd->end && fd->current_ci < fd->tap->structures.size(); ++fd->current_ci)
@@ -387,8 +429,8 @@ unsigned play(Field* fd)
             }
             else
             {
-                // Special case: check for split (tartarus swarm raid)
-                if(current_status.m_card->m_split && fd->tap->assaults.size() + fd->tap->structures.size() < 100)
+                // Special case: check for split (tartarus swarm raid, or clone battlefield effects)
+                if((current_status.m_temporary_split || current_status.m_card->m_split) && fd->tap->assaults.size() + fd->tap->structures.size() < 100)
                 {
                     CardStatus& status_split(fd->tap->assaults.add_back());
                     status_split.set(current_status.m_card);
@@ -400,6 +442,7 @@ unsigned play(Field* fd)
                         fd->skill_queue.emplace_back(&status_split, skill);
                         resolve_skill(fd);
                     }
+                    // TODO: Determine whether we need to check for Blitz for the newly-Split unit
                 }
                 // Evaluate skills
                 // Special case: Gore Typhon's infuse
@@ -480,6 +523,16 @@ inline void remove_dead(Storage<CardStatus>& storage)
 {
     storage.remove(is_it_dead);
 }
+inline void add_hp(Field* field, CardStatus* target, unsigned v)
+{
+    unsigned old_hp = target->m_hp;
+    target->m_hp = std::min(target->m_hp + v, target->m_card->m_health);
+    if(field->effect == Effect::invigorate && target->m_card->m_type == CardType::assault)
+    {
+        unsigned healed = target->m_hp - old_hp;
+        target->m_berserk += healed;
+    }
+}
 void check_regeneration(Field* fd)
 {
     for(unsigned i(0); i < fd->killed_with_regen.size(); ++i)
@@ -487,7 +540,10 @@ void check_regeneration(Field* fd)
         CardStatus& status = *fd->killed_with_regen[i];
         if(status.m_hp == 0 && status.m_card->m_regenerate > 0 && !status.m_diseased)
         {
-            status.m_hp = fd->flip() ? status.m_card->m_regenerate : 0;
+            if (fd->flip())
+            {
+                add_hp(fd, &status, status.m_card->m_regenerate);
+            }
         }
         if(status.m_hp > 0)
         {
@@ -540,6 +596,7 @@ void turn_start_phase(Field* fd)
     // Defending player's assault cards:
     // update index
     // remove augment, chaos, freeze, immobilize, jam, rally, weaken, apply refresh
+    // remove temp split
     {
         auto& assaults(fd->tip->assaults);
         for(unsigned index(0), end(assaults.size());
@@ -556,6 +613,7 @@ void turn_start_phase(Field* fd)
             status.m_jammed = false;
             status.m_rallied = 0;
             status.m_weakened = 0;
+            status.m_temporary_split = false;
             if(status.m_card->m_refresh && !status.m_diseased)
             {
 #ifndef NDEBUG
@@ -564,7 +622,7 @@ void turn_start_phase(Field* fd)
                     _DEBUG_MSG("%u %s refreshed. hp %u -> %u.\n", index, status_description(&status).c_str(), status.m_hp, status.m_card->m_health);
                 }
 #endif
-                status.m_hp = status.m_card->m_health;
+                add_hp(fd, &status, status.m_card->m_health);
             }
         }
     }
@@ -584,7 +642,7 @@ void turn_start_phase(Field* fd)
 #ifndef NDEBUG
                 _DEBUG_MSG("%s refreshed. hp %u -> %u.\n", index, status_description(&status).c_str(), status.m_hp, status.m_card->m_health);
 #endif
-                status.m_hp = status.m_card->m_health;
+                add_hp(fd, &status, status.m_card->m_health);
             }
         }
     }
@@ -595,10 +653,6 @@ void turn_start_phase(Field* fd)
     check_regeneration(fd);
 }
 //---------------------- $50 attack by assault card implementation -------------
-inline void add_hp(CardStatus* target, unsigned v)
-{
-    target->m_hp = std::min(target->m_hp + v, target->m_card->m_health);
-}
 inline void apply_poison(CardStatus* target, unsigned v)
 {
     target->m_poisoned = std::max(target->m_poisoned, v);
@@ -719,7 +773,8 @@ struct PerformAttack
     {
         if(attack_power(att_status) > 0)
         {
-            const bool fly_check(!def_status->m_card->m_flying || att_status->m_card->m_flying || att_status->m_card->m_antiair > 0 || fd->flip());
+            const bool fly_check(!def_status->m_card->m_flying || att_status->m_card->m_flying || att_status->m_card->m_antiair > 0 ||
+                                 (fd->effect != Effect::high_skies && fd->flip()));
             if(fly_check) // unnecessary check for structures, commander -> fix later ?
             {
                 // Evaluation order:
@@ -732,6 +787,14 @@ struct PerformAttack
                 // assaults only: (crush, leech if still alive)
                 // check regeneration
                 att_dmg = calculate_attack_damage<cardtype>();
+
+                // If Impenetrable, force attack damage against walls to be 0,
+                // but still activate Counter!
+                if(fd->effect == Effect::impenetrable && def_status->m_card->m_wall)
+                {
+                    att_dmg = 0;
+                }
+
                 if(att_dmg > 0)
                 {
                     immobilize<cardtype>();
@@ -743,10 +806,19 @@ struct PerformAttack
                 {
                     if(att_status->m_hp > 0)
                     {
-                        counter_berserk<cardtype>();
+                        counter<cardtype>();
+                        berserk<cardtype>();
                     }
                     crush_leech<cardtype>();
                 }
+
+                // If Impenetrable, force attack damage against walls to be 0,
+                // but still activate Counter!
+                if(fd->effect == Effect::impenetrable && def_status->m_card->m_wall && att_status->m_hp > 0)
+                {
+                    counter<cardtype>();
+                }
+
                 prepend_on_death(fd);
                 resolve_skill(fd);
                 check_regeneration(fd);
@@ -797,7 +869,7 @@ struct PerformAttack
     void oa_berserk() {}
 
     template<enum CardType::CardType>
-    void counter_berserk()
+    void counter()
     {
         if(def_status->m_card->m_counter > 0)
         {
@@ -805,6 +877,11 @@ struct PerformAttack
             remove_hp(fd, *att_status, counter_dmg);
             _DEBUG_MSG("%s counter %u by %s\n", status_description(att_status).c_str(), counter_dmg, status_description(def_status).c_str());
         }
+    }
+
+    template<enum CardType::CardType>
+    void berserk()
+    {
         att_status->m_berserk += att_status->m_card->m_berserk;
     }
 
@@ -839,7 +916,7 @@ void PerformAttack::siphon_poison_disease<CardType::assault>()
 {
     if(att_status->m_card->m_siphon > 0)
     {
-        add_hp(&fd->tap->commander, std::min(att_dmg, att_status->m_card->m_siphon));
+        add_hp(fd, &fd->tap->commander, std::min(att_dmg, att_status->m_card->m_siphon));
         _DEBUG_MSG(" \033[1;32m%s siphon %u; hp %u\033[0m\n", status_description(att_status).c_str(), std::min(att_dmg, att_status->m_card->m_siphon), fd->tap->commander.m_hp);
     }
     if(att_status->m_card->m_poison > 0)
@@ -874,7 +951,7 @@ void PerformAttack::crush_leech<CardType::assault>()
     }
     if(att_status->m_card->m_leech > 0 && att_status->m_hp > 0 && !att_status->m_diseased)
     {
-        add_hp(att_status, std::min(att_dmg, att_status->m_card->m_leech));
+        add_hp(fd, att_status, std::min(att_dmg, att_status->m_card->m_leech));
         _DEBUG_MSG("%s leech %u; hp: %u.\n", status_description(att_status).c_str(), std::min(att_dmg, att_status->m_card->m_leech), att_status->m_hp);
     }
 }
@@ -1048,6 +1125,12 @@ inline bool skill_predicate<supply>(CardStatus* c)
 { return(c->m_hp > 0 && c->m_hp < c->m_card->m_health && !c->m_diseased); }
 
 template<>
+inline bool skill_predicate<temporary_split>(CardStatus* c)
+// It is unnecessary to check for Blitz, since temporary_split status is
+// awarded before a card is played.
+{ return(c->m_delay == 0 && c->m_hp > 0); }
+
+template<>
 inline bool skill_predicate<weaken>(CardStatus* c)
 { return(c->m_delay <= 1 && c->m_hp > 0 && attack_power(c) > 0 && !c->m_jammed && !c->m_frozen && !c->m_immobilized); }
 
@@ -1080,6 +1163,10 @@ inline void perform_skill<chaos>(Field* fd, CardStatus* c, unsigned v)
 template<>
 inline void perform_skill<cleanse>(Field* fd, CardStatus* c, unsigned v)
 {
+    if(fd->effect == Effect::decay)
+    {
+        return;
+    }
     c->m_chaos = false;
     c->m_diseased = false;
     c->m_enfeebled = 0;
@@ -1104,7 +1191,7 @@ inline void perform_skill<freeze>(Field* fd, CardStatus* c, unsigned v)
 template<>
 inline void perform_skill<heal>(Field* fd, CardStatus* c, unsigned v)
 {
-    add_hp(c, v);
+    add_hp(fd, c, v);
 }
 
 template<>
@@ -1140,7 +1227,7 @@ inline void perform_skill<rally>(Field* fd, CardStatus* c, unsigned v)
 template<>
 inline void perform_skill<repair>(Field* fd, CardStatus* c, unsigned v)
 {
-    add_hp(c, v);
+    add_hp(fd, c, v);
 }
 
 template<>
@@ -1172,7 +1259,13 @@ inline void perform_skill<strike>(Field* fd, CardStatus* c, unsigned v)
 template<>
 inline void perform_skill<supply>(Field* fd, CardStatus* c, unsigned v)
 {
-    add_hp(c, v);
+    add_hp(fd, c, v);
+}
+
+template<>
+inline void perform_skill<temporary_split>(Field* fd, CardStatus* c, unsigned v)
+{
+    c->m_temporary_split = true;
 }
 
 template<>
@@ -1364,6 +1457,9 @@ template<> std::vector<CardStatus*>& skill_targets<strike>(Field* fd, CardStatus
 { return(skill_targets_hostile_assault(fd, src_status)); }
 
 template<> std::vector<CardStatus*>& skill_targets<supply>(Field* fd, CardStatus* src_status)
+{ return(skill_targets_allied_assault(fd, src_status)); }
+
+template<> std::vector<CardStatus*>& skill_targets<temporary_split>(Field* fd, CardStatus* src_status)
 { return(skill_targets_allied_assault(fd, src_status)); }
 
 template<> std::vector<CardStatus*>& skill_targets<weaken>(Field* fd, CardStatus* src_status)
@@ -1615,6 +1711,16 @@ void summon_card(Field* fd, unsigned player, const Card* summoned)
         {
             card_status.blitz = true;
         }
+
+        if(fd->effect == Effect::toxic)
+        {
+            card_status.m_poisoned = 1;
+        }
+        else if(fd->effect == Effect::decay)
+        {
+            card_status.m_poisoned = 1;
+            card_status.m_diseased = true;
+        }
     }
 }
 void perform_summon(Field* fd, CardStatus* src_status, const SkillSpec& s)
@@ -1648,16 +1754,30 @@ void perform_mimic(Field* fd, CardStatus* src_status, const SkillSpec& s)
     // mimic cannot be triggered by anything. So it should be the only skill in the unresolved skill table.
     // so we can probably clear it safely. This is necessary, because mimic calls resolve_skill as well (infinite loop).
     fd->skill_queue.clear();
-    CardStatus* c(get_target_hostile_fast<mimic>(fd, src_status, s));
-    if(c)
+    CardStatus* c(nullptr);
+    if(fd->effect == Effect::copycat)
     {
+        std::vector<CardStatus*>& cards(skill_targets_allied_assault(fd, src_status));
+        unsigned array_head{select_fast<mimic>(fd, src_status, cards, s)};
+        if(array_head > 0)
+        {
+            c = fd->selection_array[fd->rand(0, array_head - 1)];
+        }
+    }
+    else
+    {
+        c = get_target_hostile_fast<mimic>(fd, src_status, s);
         // evade check for mimic
         // individual skills are subject to evade checks too,
         // but resolve_skill will handle those.
-        if(c->m_card->m_evade && (!src_status || !src_status->m_chaos) && fd->flip())
+        if(c && c->m_card->m_evade && (!src_status || !src_status->m_chaos) && fd->flip())
         {
             return;
         }
+    }
+
+    if(c)
+    {
         _DEBUG_MSG("%s on (%s)\n", skill_names[std::get<0>(s)].c_str(), c->m_card->m_name.c_str());
         for(auto skill: c->m_card->m_skills)
         {
@@ -1708,7 +1828,153 @@ void fill_skill_table()
     skill_table[strike] = perform_targetted_hostile_fast<strike>;
     skill_table[strike_all] = perform_global_hostile_fast<strike>;
     skill_table[summon] = perform_summon;
+    skill_table[temporary_split] = perform_targetted_allied_fast<temporary_split>;
     skill_table[trigger_regen] = perform_trigger_regen;
     skill_table[weaken] = perform_targetted_hostile_fast<weaken>;
     skill_table[weaken_all] = perform_global_hostile_fast<weaken>;
+}
+//------------------------------------------------------------------------------
+// Utility functions for modify_cards.
+
+// Adds the skill "<new_skill> <magnitude>" to all assaults,
+// except those who have any instance of either <new_skill> or <conflict>.
+inline void maybe_add_to_assaults(Cards& cards, ActiveSkill new_skill, unsigned magnitude, ActiveSkill conflict)
+{
+    for(Card* card: cards.cards)
+    {
+        if(card->m_type != CardType::assault)
+        {
+            continue;
+        }
+
+        bool conflict(false);
+        for(auto& skill: card->m_skills)
+        {
+            if(std::get<0>(skill) == new_skill ||
+               std::get<0>(skill) == conflict)
+            {
+                conflict = true;
+            }
+        }
+
+        if(!conflict)
+        {
+            card->add_skill(new_skill, magnitude, allfactions);
+        }
+    }
+}
+// Adds the skill "<skill> <magnitude>" to all commanders.
+inline void add_to_commanders(Cards& cards, ActiveSkill skill, unsigned magnitude)
+{
+    for(Card* card: cards.cards)
+    {
+        if(card->m_type != CardType::commander)
+        {
+            continue;
+        }
+        card->add_skill(skill, magnitude, allfactions);
+    }
+}
+
+// Adds the skill "<new> <magnitude>" to all commanders.
+// If the commander has an instance of either <old> or <new> in its skill list,
+// the new skill replaces it.
+// Otherwise, the new skill is added on to the end.
+inline void replace_on_commanders(Cards& cards, ActiveSkill old_skill, ActiveSkill new_skill, unsigned magnitude)
+{
+    for(Card* card: cards.cards)
+    {
+        if(card->m_type != CardType::commander)
+        {
+            continue;
+        }
+
+        bool replaced(false);
+        for(auto& skill: card->m_skills)
+        {
+            if(std::get<0>(skill) == old_skill ||
+               std::get<0>(skill) == new_skill)
+            {
+                skill = std::make_tuple(new_skill, magnitude, allfactions);
+                replaced = true;
+            }
+        }
+
+        if(!replaced)
+        {
+            card->add_skill(new_skill, magnitude, allfactions);
+        }
+    }
+}
+//------------------------------------------------------------------------------
+void modify_cards(Cards& cards, enum Effect effect)
+{
+    switch (effect)
+    {
+        case Effect::none:
+            break;
+        case Effect::time_surge:
+            add_to_commanders(cards, rush, 1);
+            break;
+        case Effect::copycat:
+            // Do nothing; this is implemented in perform_mimic
+            break;
+        case Effect::quicksilver:
+            for(Card* card: cards.cards)
+            {
+                if(card->m_type == CardType::assault)
+                {
+                    card->m_evade = true;
+                }
+            }
+            break;
+        case Effect::decay:
+            // Do nothing; this is implemented in PlayCard::fieldEffects,
+            // summon_card, and perform_skill<cleanse>
+            break;
+        case Effect::high_skies:
+            // Do nothing; this is implemented in PerformAttack
+            break;
+        case Effect::impenetrable:
+            // Also implemented in PerformAttack
+            for(Card* card: cards.cards)
+            {
+                if(card->m_type == CardType::structure)
+                {
+                    card->m_refresh = false;
+                }
+            }
+            break;
+        case Effect::invigorate:
+            // Do nothing; this is implemented in add_hp
+            break;
+        case Effect::clone_project:
+        case Effect::clone_experiment:
+            // Do nothing; these are implemented in the temporary_split skill
+            break;
+        case Effect::friendly_fire:
+            replace_on_commanders(cards, chaos, chaos_all, 0);
+            maybe_add_to_assaults(cards, strike, 1, strike_all);
+            break;
+        case Effect::genesis:
+            // Do nothing; this is implemented in play
+            break;
+        case Effect::decrepit:
+            replace_on_commanders(cards, enfeeble, enfeeble_all, 1);
+            break;
+        case Effect::forcefield:
+            replace_on_commanders(cards, protect, protect_all, 1);
+            break;
+        case Effect::chilling_touch:
+            add_to_commanders(cards, freeze, 0);
+            break;
+        case Effect::toxic:
+            // Do nothing; this is implemented in PlayCard::fieldEffects
+            // and summon_card
+            break;
+        default:
+            // TODO: throw something more useful
+            throw effect;
+            break;
+    }
 }

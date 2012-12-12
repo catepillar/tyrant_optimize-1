@@ -21,6 +21,7 @@ enum ActiveSkill
  freeze, freeze_all, heal, heal_all, infuse, jam, jam_all,
  mimic, protect, protect_all, rally, rally_all, repair, repair_all, rush, shock,
  siege, siege_all, strike, strike_all, summon, supply,
+ temporary_split, // not actually a skill; handles Clone Project/Experiment
  trigger_regen, // not actually a skill; handles regeneration after strike/siege
  weaken, weaken_all, num_skills};
 extern std::string skill_names[num_skills];
@@ -36,6 +37,31 @@ enum CardType {
 }
 
 extern std::string cardtype_names[CardType::num_cardtypes];
+
+enum Effect {
+    none,
+    time_surge,
+    copycat,
+    quicksilver,
+    decay,
+    high_skies,
+    impenetrable,
+    invigorate,
+    clone_project,
+    friendly_fire,
+    genesis,
+    artillery_fire,
+    photon_shield,
+    decrepit,
+    forcefield,
+    chilling_touch,
+    clone_experiment,
+    toxic,
+    haunt,
+    num_effects
+};
+
+extern std::string effect_names[Effect::num_effects];
 
 enum gamemode_t
 {
