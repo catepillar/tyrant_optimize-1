@@ -262,6 +262,8 @@ void read_cards(Cards& cards)
                         if(attacked) { c->m_disease_oa = true; }
                         else {c->m_disease = true; }
                     }
+                    if(strcmp(skill->first_attribute("id")->value(), "emulate") == 0)
+                    { c->m_emulate = true; }
                     if(strcmp(skill->first_attribute("id")->value(), "evade") == 0)
                     { c->m_evade = true; }
                     if(strcmp(skill->first_attribute("id")->value(), "fear") == 0)

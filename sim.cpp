@@ -1575,6 +1575,18 @@ void perform_targetted_allied_fast(Field* fd, CardStatus* src_status, const Skil
                 perform_skill<skill_id>(fd, src_status, std::get<1>(s));
             }
         }
+
+        // check emulate
+        Hand* opp = fd->players[opponent(c->m_player)];
+        if(opp->assaults.size() > c->m_index)
+        {
+            CardStatus& emulator = opp->assaults[c->m_index];
+            if(emulator.m_card->m_emulate && skill_predicate<skill_id>(&emulator))
+            {
+                _DEBUG_MSG("Emulate (%s %u) on (%s)\n", skill_names[skill_id].c_str(), std::get<1>(s), emulator.m_card->m_name.c_str());
+                perform_skill<skill_id>(fd, &emulator, std::get<1>(s));
+            }
+        }
     }
 }
 
@@ -1636,6 +1648,18 @@ void perform_global_allied_fast(Field* fd, CardStatus* src_status, const SkillSp
             {
                 _DEBUG_MSG("Tribute (%s %u) on (%s)\n", skill_names[skill_id].c_str(), std::get<1>(s), src_status->m_card->m_name.c_str());
                 perform_skill<skill_id>(fd, src_status, std::get<1>(s));
+            }
+        }
+
+        // check emulate
+        Hand* opp = fd->players[opponent(c->m_player)];
+        if(opp->assaults.size() > c->m_index)
+        {
+            CardStatus& emulator = opp->assaults[c->m_index];
+            if(emulator.m_card->m_emulate && skill_predicate<skill_id>(&emulator))
+            {
+                _DEBUG_MSG("Emulate (%s %u) on (%s)\n", skill_names[skill_id].c_str(), std::get<1>(s), emulator.m_card->m_name.c_str());
+                perform_skill<skill_id>(fd, &emulator, std::get<1>(s));
             }
         }
     }

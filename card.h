@@ -21,6 +21,7 @@ public:
         m_delay(0),
         m_disease(false),
         m_disease_oa(false),
+        m_emulate(false),
         m_evade(false),
         m_faction(imperial),
         m_fear(false),
@@ -75,6 +76,7 @@ public:
     unsigned m_delay;
     bool m_disease;
     bool m_disease_oa;
+    bool m_emulate;
     bool m_evade;
     Faction m_faction;
     bool m_fear;
