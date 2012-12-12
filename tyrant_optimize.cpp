@@ -37,6 +37,8 @@
 #include "xml.h"
 //#include "timer.hpp"
 
+namespace { bool use_anp{false}; }
+
 using namespace std::placeholders;
 //------------------------------------------------------------------------------
 void print_deck(DeckIface& deck)
@@ -392,6 +394,7 @@ void thread_evaluate(boost::barrier& main_barrier,
                      SimulationData& sim,
                      const Process& p)
 {
+    bool use_anp_local{use_anp};
     while(true)
     {
         main_barrier.wait();
@@ -415,7 +418,12 @@ void thread_evaluate(boost::barrier& main_barrier,
                 std::vector<unsigned> thread_score_local(thread_score.size(), 0); //!
                 for(unsigned index(0); index < result.size(); ++index)
                 {
-                    thread_score[index] += result[index] == 0 ? 1 : 0; //!
+                    // If not using ANP and we won, just count 1 win, not points.
+                    if(!use_anp_local && result[index] != 0)
+                    {
+                        result[index] = 1;
+                    }
+                    thread_score[index] += result[index]; //!
                     thread_score_local[index] = thread_score[index]; // !
                 }
                 ++thread_total; //!
@@ -439,7 +447,8 @@ void thread_evaluate(boost::barrier& main_barrier,
                     {
                         score_accum = thread_score_local[0];
                     }
-                    if(boost::math::binomial_distribution<>::find_upper_bound_on_p(thread_total_local, score_accum, 0.01) < thread_prev_score)
+                    // TODO: Don't know what we want to do with this for ANP
+                    if(!use_anp && boost::math::binomial_distribution<>::find_upper_bound_on_p(thread_total_local, score_accum, 0.01) < thread_prev_score)
                     {
                         shared_mutex.lock(); //<<<<
                         //std::cout << thread_total_local << "\n";
@@ -454,6 +463,12 @@ void thread_evaluate(boost::barrier& main_barrier,
 //------------------------------------------------------------------------------
 void print_score_info(const std::pair<std::vector<unsigned> , unsigned>& results, std::vector<double>& factors)
 {
+    if(use_anp)
+    {
+        std::cout << "ANP: " << compute_score(results, factors) << std::endl;
+        return;
+    }
+
     std::cout << "win%: " << compute_score(results, factors) * 100.0 << " (";
     for(auto val: results.first)
     {
@@ -474,7 +489,8 @@ void hill_climbing(unsigned num_iterations, DeckIface* d1, Process& proc)
     std::vector<const Card*> best_cards = d1->cards;
     bool deck_has_been_improved = true;
     bool eval_commander = true;
-    while(deck_has_been_improved && best_score < 1.0)
+    double best_possible = use_anp ? 25 : 1;
+    while(deck_has_been_improved && best_score < best_possible)
     {
         deck_has_been_improved = false;
         for(unsigned slot_i(0); slot_i < d1->cards.size(); ++slot_i)
@@ -555,7 +571,8 @@ void hill_climbing_ordered(unsigned num_iterations, DeckOrdered* d1, Process& pr
     std::vector<const Card*> best_cards = d1->cards;
     bool deck_has_been_improved = true;
     bool eval_commander = true;
-    while(deck_has_been_improved && best_score < 1.0)
+    double best_possible = use_anp ? 25 : 1;
+    while(deck_has_been_improved && best_score < best_possible)
     {
         deck_has_been_improved = false;
         std::set<unsigned> remaining_cards;
@@ -571,7 +588,7 @@ void hill_climbing_ordered(unsigned num_iterations, DeckOrdered* d1, Process& pr
             {
                 for(const Card* commander_candidate: proc.cards.player_commanders)
                 {
-                    if(best_score == 1.0) { break; }
+                    if(best_score == best_possible) { break; }
                     // Various checks to check if the card is accepted
                     assert(commander_candidate->m_type == CardType::commander);
                     if(commander_candidate == best_commander) { continue; }
@@ -598,7 +615,7 @@ void hill_climbing_ordered(unsigned num_iterations, DeckOrdered* d1, Process& pr
             }
             for(const Card* card_candidate: non_commander_cards)
             {
-                if(best_score == 1.0) { break; }
+                if(best_score == best_possible) { break; }
                 // Various checks to check if the card is accepted
                 assert(card_candidate->m_type != CardType::commander);
                 for(unsigned slot_i(0); slot_i < d1->cards.size(); ++slot_i)
@@ -890,6 +907,7 @@ void usage(int argc, char** argv)
     std::cout << "  example: \'fear:0.2;slowroll:0.8\' means fear is the defense deck 20% of the time, while slowroll is the defense deck 80% of the time.\n";
     std::cout << "\n";
     std::cout << "Flags:\n";
+    std::cout << "  -a: optimize for ANP instead of win rate.\n";
     std::cout << "  -c: don't try to optimize the commander.\n";
     std::cout << "  -o: restrict hill climbing to the owned cards listed in \"ownedcards.txt\".\n";
     std::cout << "  -r: the attack deck is played in order instead of randomly (respects the 3 cards drawn limit).\n";
@@ -942,7 +960,11 @@ int main(int argc, char** argv)
     std::vector<std::tuple<unsigned, unsigned, Operation> > todo;
     for(unsigned argIndex(3); argIndex < argc; ++argIndex)
     {
-        if(strcmp(argv[argIndex], "-c") == 0)
+        if(strcmp(argv[argIndex], "-a") == 0)
+        {
+            use_anp = true;
+        }
+        else if(strcmp(argv[argIndex], "-c") == 0)
         {
             keep_commander = true;
         }

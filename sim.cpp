@@ -309,7 +309,7 @@ void PlayCard::onPlaySkills<CardType::action>()
 //------------------------------------------------------------------------------
 void turn_start_phase(Field* fd);
 void prepend_on_death(Field* fd);
-// return value : 0 -> attacker wins, 1 -> defender wins
+// return value : (raid points) -> attacker wins, 0 -> defender wins
 unsigned play(Field* fd)
 {
     fd->players[0]->commander.m_player = 0;
@@ -320,12 +320,24 @@ unsigned play(Field* fd)
     fd->tip = fd->players[fd->tipi];
     fd->fusion_count = 0;
     fd->end = false;
+
+    // ANP: Last decision point is second-to-last card played.
+    fd->points_since_last_decision = 0;
+    unsigned p0_size = fd->players[0]->deck->cards.size();
+    fd->last_decision_turn = p0_size * 2 - (surge ? 2 : 3);
+
     // Shuffle deck
     while(fd->turn < turn_limit && !fd->end)
     {
         fd->current_phase = Field::playcard_phase;
         // Initialize stuff, remove dead cards
         _DEBUG_MSG("##### TURN %u #####\n", fd->turn);
+        // ANP: If it's the player's turn and he's making a decision,
+        // reset his points to 0.
+        if(fd->tapi == 0 && fd->turn <= fd->last_decision_turn)
+        {
+            fd->points_since_last_decision = 0;
+        }
         turn_start_phase(fd);
         // Special case: refresh on commander
         if(fd->tip->commander.m_card->m_refresh && fd->tip->commander.m_hp > 0)
@@ -404,10 +416,30 @@ unsigned play(Field* fd)
         ++fd->turn;
     }
     // defender wins
-    if(fd->players[0]->commander.m_hp == 0) { _DEBUG_MSG("Defender wins.\n"); return(1); }
+    if(fd->players[0]->commander.m_hp == 0)
+    {
+        _DEBUG_MSG("Defender wins.\n");
+        return(0);
+    }
     // attacker wins
-    if(fd->players[1]->commander.m_hp == 0) { _DEBUG_MSG("Attacker wins.\n"); return(0); }
-    if(fd->turn >= turn_limit) { return(1); }
+    if(fd->players[1]->commander.m_hp == 0)
+    {
+        // ANP: Speedy if last_decision + 10 > turn.
+        // fd->turn has advanced once past the actual turn the battle has ended.
+        // So we were speedy if last_decision + 10 > (fd->turn - 1),
+        // or, equivalently, if last_decision + 10 >= fd->turn.
+        bool speedy = fd->last_decision_turn + 10 >= fd->turn;
+        if(fd->points_since_last_decision > 10)
+        {
+            fd->points_since_last_decision = 10;
+        }
+        _DEBUG_MSG("Attacker wins.\n");
+        return(10 + (speedy ? 5 : 0) + fd->points_since_last_decision);
+    }
+    if(fd->turn >= turn_limit)
+    {
+        return(0);
+    }
 }
 //------------------------------------------------------------------------------
 // All the stuff that happens at the beginning of a turn, before a card is played
@@ -659,6 +691,12 @@ void remove_commander_hp(Field* fd, CardStatus& status, unsigned dmg)
     assert(status.m_hp > 0);
     assert(status.m_card->m_type == CardType::commander);
     status.m_hp = safe_minus(status.m_hp, dmg);
+    // ANP: If commander is enemy's, player gets points equal to damage.
+    // Points are awarded for overkill, so it is correct to simply add dmg.
+    if(status.m_player == 1)
+    {
+        fd->points_since_last_decision += dmg;
+    }
     if(status.m_hp == 0) { fd->end = true; }
 }
 //------------------------------------------------------------------------------
